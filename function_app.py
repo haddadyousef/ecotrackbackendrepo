@@ -7,10 +7,49 @@ import os
 
 app = func.FunctionApp()
 
+@app.function_name(name="TestConnection")
+@app.route(route="testconnection", methods=["GET"])
+def test_connection(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        connection_string = os.environ["CosmosDBConnection"]
+        logging.info(f"Connection string starts with: {connection_string[:50]}...")
+        
+        client = CosmosClient.from_connection_string(connection_string)
+        logging.info("CosmosDB client created successfully")
+        
+        database = client.get_database_client("LeaderboardDB")
+        logging.info("Database client created successfully")
+        
+        container = database.get_container_client("Scores")
+        logging.info("Container client created successfully")
+        
+        # Try to create a test document
+        test_doc = {
+            'id': 'test_connection_doc',
+            'test': 'This is a test document'
+        }
+        
+        container.upsert_item(test_doc)
+        logging.info("Test document created successfully")
+        
+        return func.HttpResponse(
+            "Connection test successful",
+            status_code=200
+        )
+    except Exception as e:
+        logging.error(f"Connection test failed: {str(e)}")
+        return func.HttpResponse(
+            f"Connection test failed: {str(e)}",
+            status_code=500
+        )
+
 @app.function_name(name="UpdateWeeklyScore")
 @app.route(route="updateweeklyscore", methods=["POST"])
 def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
     try:
+        # Add logging
+        logging.info("Starting UpdateWeeklyScore function")
+        
         req_body = req.get_json()
         user_id = req_body.get('userId')
         weekly_score = req_body.get('weeklyScore')
@@ -21,11 +60,18 @@ def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
                 status_code=400
             )
 
-        # Initialize Cosmos DB client
+        # Initialize Cosmos DB client with logging
         connection_string = os.environ["CosmosDBConnection"]
+        logging.info(f"Connection string starts with: {connection_string[:50]}...")
+        
         client = CosmosClient.from_connection_string(connection_string)
+        logging.info("CosmosDB client created successfully")
+        
         database = client.get_database_client("LeaderboardDB")
+        logging.info("Database client created successfully")
+        
         container = database.get_container_client("Scores")
+        logging.info("Container client created successfully")
 
         # Get current date for the week number
         current_date = datetime.datetime.utcnow()
@@ -41,6 +87,7 @@ def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
         }
 
         container.upsert_item(document)
+        logging.info(f"Document upserted successfully for user {user_id}")
         
         return func.HttpResponse(
             json.dumps({
@@ -51,6 +98,7 @@ def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
             status_code=200
         )
     except ValueError:
+        logging.error("Invalid request body")
         return func.HttpResponse(
             "Invalid request body",
             status_code=400
@@ -67,11 +115,20 @@ def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="leaderboard", methods=["GET"])
 def get_leaderboard(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        # Initialize Cosmos DB client
+        logging.info("Starting GetLeaderboard function")
+        
+        # Initialize Cosmos DB client with logging
         connection_string = os.environ["CosmosDBConnection"]
+        logging.info(f"Connection string starts with: {connection_string[:50]}...")
+        
         client = CosmosClient.from_connection_string(connection_string)
+        logging.info("CosmosDB client created successfully")
+        
         database = client.get_database_client("LeaderboardDB")
+        logging.info("Database client created successfully")
+        
         container = database.get_container_client("Scores")
+        logging.info("Container client created successfully")
 
         # Get current week number
         current_week = datetime.datetime.utcnow().isocalendar()[1]
@@ -85,6 +142,8 @@ def get_leaderboard(req: func.HttpRequest) -> func.HttpResponse:
             parameters=parameters,
             enable_cross_partition_query=True
         ))
+        
+        logging.info(f"Retrieved {len(items)} items from leaderboard")
 
         return func.HttpResponse(
             json.dumps(items),
@@ -103,14 +162,23 @@ def get_leaderboard(req: func.HttpRequest) -> func.HttpResponse:
 @app.schedule(schedule="0 0 0 * * *", arg_name="timer", run_on_startup=False)
 def reset_daily_scores(timer: func.TimerRequest) -> None:
     try:
+        logging.info("Starting ResetDailyScores function")
+        
         utc_timestamp = datetime.datetime.utcnow().replace(
             tzinfo=datetime.timezone.utc).isoformat()
         
-        # Initialize Cosmos DB client
+        # Initialize Cosmos DB client with logging
         connection_string = os.environ["CosmosDBConnection"]
+        logging.info(f"Connection string starts with: {connection_string[:50]}...")
+        
         client = CosmosClient.from_connection_string(connection_string)
+        logging.info("CosmosDB client created successfully")
+        
         database = client.get_database_client("LeaderboardDB")
+        logging.info("Database client created successfully")
+        
         container = database.get_container_client("Scores")
+        logging.info("Container client created successfully")
 
         # Get current week number
         current_week = datetime.datetime.utcnow().isocalendar()[1]
