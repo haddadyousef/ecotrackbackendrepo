@@ -8,23 +8,26 @@ import os
 
 app = func.FunctionApp()
 
-@@ -14,9 +15,32 @@ def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
+@app.function_name(name="UpdateWeeklyScore")
+@app.route(route="updateweeklyscore", methods=["POST"])
+def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        req_body = req.get_json()
         user_id = req_body.get('userId')
         weekly_score = req_body.get('weeklyScore')
 
-        # Here we'll add database operations later
-        # For now, just logging the received data
-        logging.info(f'Received score update: User {user_id}, Score {weekly_score}')
         if not user_id or weekly_score is None:
             return func.HttpResponse(
                 "Please pass userId and weeklyScore in the request body",
                 status_code=400
             )
+
         # Initialize Cosmos DB client
         connection_string = os.environ["CosmosDBConnection"]
         client = CosmosClient.from_connection_string(connection_string)
         database = client.get_database_client("LeaderboardDB")
         container = database.get_container_client("Scores")
+
         # Get current date for the week number
         current_date = datetime.datetime.utcnow()
         week_number = current_date.isocalendar()[1]
@@ -37,11 +40,19 @@ app = func.FunctionApp()
             'weeklyScore': weekly_score,
             'lastUpdated': current_date.isoformat()
         }
-        container.upsert_item(document)
 
+        container.upsert_item(document)
+        
         return func.HttpResponse(
             json.dumps({
-@@ -31,28 +55,81 @@ def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
+                "message": f"Score updated for user {user_id}",
+                "score": weekly_score
+            }),
+            mimetype="application/json",
+            status_code=200
+        )
+    except ValueError:
+        return func.HttpResponse(
             "Invalid request body",
             status_code=400
         )
@@ -56,26 +67,16 @@ app = func.FunctionApp()
 @app.function_name(name="GetLeaderboard")
 @app.route(route="leaderboard", methods=["GET"])
 def get_leaderboard(req: func.HttpRequest) -> func.HttpResponse:
-    # For now, returning dummy data
-    # We'll replace this with database queries later
-    leaderboard_data = [
-        {"userId": "user1", "weeklyScore": 100},
-        {"userId": "user2", "weeklyScore": 90}
-    ]
-    
-    return func.HttpResponse(
-        json.dumps(leaderboard_data),
-        mimetype="application/json",
-        status_code=200
-    )
     try:
         # Initialize Cosmos DB client
         connection_string = os.environ["CosmosDBConnection"]
         client = CosmosClient.from_connection_string(connection_string)
         database = client.get_database_client("LeaderboardDB")
         container = database.get_container_client("Scores")
+
         # Get current week number
         current_week = datetime.datetime.utcnow().isocalendar()[1]
+
         # Query for current week's scores
         query = "SELECT c.userId, c.weeklyScore FROM c WHERE c.weekNumber = @week ORDER BY c.weeklyScore DESC"
         parameters = [{"name": "@week", "value": current_week}]
@@ -85,6 +86,7 @@ def get_leaderboard(req: func.HttpRequest) -> func.HttpResponse:
             parameters=parameters,
             enable_cross_partition_query=True
         ))
+
         return func.HttpResponse(
             json.dumps(items),
             mimetype="application/json",
@@ -101,11 +103,6 @@ def get_leaderboard(req: func.HttpRequest) -> func.HttpResponse:
 @app.function_name(name="ResetDailyScores")
 @app.schedule(schedule="0 0 0 * * *", arg_name="timer", run_on_startup=False)
 def reset_daily_scores(timer: func.TimerRequest) -> None:
-    utc_timestamp = datetime.datetime.utcnow().replace(
-        tzinfo=datetime.timezone.utc).isoformat()
-    
-    logging.info(f'Reset daily scores function ran at: {utc_timestamp}')
-    # Here we'll add code to reset daily scores
     try:
         utc_timestamp = datetime.datetime.utcnow().replace(
             tzinfo=datetime.timezone.utc).isoformat()
@@ -115,8 +112,10 @@ def reset_daily_scores(timer: func.TimerRequest) -> None:
         client = CosmosClient.from_connection_string(connection_string)
         database = client.get_database_client("LeaderboardDB")
         container = database.get_container_client("Scores")
+
         # Get current week number
         current_week = datetime.datetime.utcnow().isocalendar()[1]
+
         # Query for current week's scores
         query = "SELECT * FROM c WHERE c.weekNumber = @week"
         parameters = [{"name": "@week", "value": current_week}]
@@ -126,10 +125,12 @@ def reset_daily_scores(timer: func.TimerRequest) -> None:
             parameters=parameters,
             enable_cross_partition_query=True
         ))
+
         # Reset daily scores for each user
         for item in items:
             item['dailyScore'] = 0
             container.upsert_item(item)
+
         logging.info(f'Reset daily scores function completed at: {utc_timestamp}')
     except Exception as e:
         logging.error(f"Error resetting daily scores: {str(e)}")
