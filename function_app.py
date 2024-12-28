@@ -135,4 +135,4 @@ def reset_daily_scores(timer: func.TimerRequest) -> None:
     except Exception as e:
         logging.error(f"Error resetting daily scores: {str(e)}")
 
-This is my backend code. Can you make edits to make it so that the least amount of emissions is at the top and the greatest at trhe bottom
+
