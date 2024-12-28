@@ -31,7 +31,7 @@ def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
         # Get current date for the week number
         current_date = datetime.datetime.utcnow()
         week_number = current_date.isocalendar()[1]
-        
+
         # Create or update user score document
         document = {
             'id': f"{user_id}_{week_number}",
@@ -42,7 +42,7 @@ def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
         }
 
         container.upsert_item(document)
-        
+
         return func.HttpResponse(
             json.dumps({
                 "message": f"Score updated for user {user_id}",
@@ -79,8 +79,10 @@ def get_leaderboard(req: func.HttpRequest) -> func.HttpResponse:
 
         # Query for current week's scores
         query = "SELECT c.userId, c.weeklyScore FROM c WHERE c.weekNumber = @week ORDER BY c.weeklyScore DESC"
+        # Query for current week's scores - Changed ORDER BY to ASC instead of DESC
+        query = "SELECT c.userId, c.weeklyScore FROM c WHERE c.weekNumber = @week ORDER BY c.weeklyScore ASC"
         parameters = [{"name": "@week", "value": current_week}]
-        
+
         items = list(container.query_items(
             query=query,
             parameters=parameters,
@@ -106,7 +108,7 @@ def reset_daily_scores(timer: func.TimerRequest) -> None:
     try:
         utc_timestamp = datetime.datetime.utcnow().replace(
             tzinfo=datetime.timezone.utc).isoformat()
-        
+
         # Initialize Cosmos DB client
         connection_string = os.environ["CosmosDBConnection"]
         client = CosmosClient.from_connection_string(connection_string)
@@ -119,7 +121,7 @@ def reset_daily_scores(timer: func.TimerRequest) -> None:
         # Query for current week's scores
         query = "SELECT * FROM c WHERE c.weekNumber = @week"
         parameters = [{"name": "@week", "value": current_week}]
-        
+
         items = list(container.query_items(
             query=query,
             parameters=parameters,
@@ -134,5 +136,3 @@ def reset_daily_scores(timer: func.TimerRequest) -> None:
         logging.info(f'Reset daily scores function completed at: {utc_timestamp}')
     except Exception as e:
         logging.error(f"Error resetting daily scores: {str(e)}")
-
-
