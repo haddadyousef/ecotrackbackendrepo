@@ -66,7 +66,6 @@ def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.function_name(name="GetLeaderboard")
 @app.route(route="leaderboard", methods=["GET"])
-
 def get_leaderboard(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Initialize Cosmos DB client
@@ -78,8 +77,8 @@ def get_leaderboard(req: func.HttpRequest) -> func.HttpResponse:
         # Get current week number
         current_week = datetime.datetime.utcnow().isocalendar()[1]
 
-        # Query for current week's scores - Changed ORDER BY to ASC instead of DESC
-        query = "SELECT c.userId, c.weeklyScore FROM c WHERE c.weekNumber = @week ORDER BY c.weeklyScore ASC"
+        # Query for current week's scores
+        query = "SELECT c.userId, c.weeklyScore FROM c WHERE c.weekNumber = @week ORDER BY c.weeklyScore DESC"
         parameters = [{"name": "@week", "value": current_week}]
         
         items = list(container.query_items(
@@ -135,3 +134,5 @@ def reset_daily_scores(timer: func.TimerRequest) -> None:
         logging.info(f'Reset daily scores function completed at: {utc_timestamp}')
     except Exception as e:
         logging.error(f"Error resetting daily scores: {str(e)}")
+
+This is my backend code. Can you make edits to make it so that the least amount of emissions is at the top and the greatest at trhe bottom
