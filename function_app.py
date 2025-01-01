@@ -578,3 +578,88 @@ def get_user_position(req: func.HttpRequest) -> func.HttpResponse:
             json.dumps({"error": str(e)}),
             status_code=500
         )
+@app.function_name(name="UpdateWeeklyScore")
+@app.route(route="updateweeklyscore", methods=["POST"])
+def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        req_body = req.get_json()
+        user_id = req_body.get('userId')
+        weekly_score = req_body.get('weeklyScore')
+        daily_history = req_body.get('dailyHistory')
+        current_day_emissions = req_body.get('currentDayEmissions')
+        
+        if not all([user_id, weekly_score is not None, daily_history, current_day_emissions]):
+            return func.HttpResponse(
+                json.dumps({"error": "Missing required fields"}),
+                status_code=400
+            )
+
+        current_week = datetime.datetime.utcnow().isocalendar()[1]
+        user_doc = get_or_create_user(user_id, current_week)
+        
+        # Update user data
+        user_doc['weeklyScore'] = weekly_score
+        user_doc['dailyHistory'] = daily_history
+        user_doc['currentDayEmissions'] = current_day_emissions
+        user_doc['lastUpdated'] = datetime.datetime.utcnow().isoformat()
+        
+        # Save updates
+        container = db_manager.get_container(scores_container_name)
+        container.upsert_item(user_doc)
+        
+        return func.HttpResponse(
+            json.dumps({
+                "message": "Score updated successfully",
+                "currentScore": user_doc['weeklyScore']
+            }),
+            status_code=200
+        )
+
+    except Exception as e:
+        logging.error(f"Error updating weekly score: {str(e)}")
+        return func.HttpResponse(
+            json.dumps({"error": str(e)}),
+            status_code=500
+        )
+@app.function_name(name="HourlyUpdate")
+@app.schedule(schedule="0 0 * * * *", arg_name="timer", run_on_startup=False)
+def hourly_update(timer: func.TimerRequest) -> None:
+    try:
+        container = db_manager.get_container(scores_container_name)
+        current_week = datetime.datetime.utcnow().isocalendar()[1]
+        
+        # Get all active users
+        query = "SELECT * FROM c WHERE c.weekNumber = @week"
+        parameters = [{"name": "@week", "value": current_week}]
+        
+        items = list(container.query_items(
+            query=query,
+            parameters=parameters,
+            enable_cross_partition_query=True
+        ))
+
+        for item in items:
+            try:
+                # Update passive emissions (adjusted values)
+                item['currentDayEmissions']['food'] += 17  # 400/24 per hour
+                item['currentDayEmissions']['goods'] += 19  # 460/24 per hour
+                
+                # Update weekly score
+                item['weeklyScore'] = calculate_weekly_score(
+                    item['dailyHistory'],
+                    item['currentDayEmissions'],
+                    item.get('offsetGrams', 0)
+                )
+                
+                # Update timestamp
+                item['lastUpdated'] = datetime.datetime.utcnow().isoformat()
+                
+                container.upsert_item(item)
+                
+                logging.info(f"Updated emissions for user {item['userId']}: food={item['currentDayEmissions']['food']}, goods={item['currentDayEmissions']['goods']}")
+            except Exception as e:
+                logging.error(f"Error updating user {item.get('userId')}: {str(e)}")
+                continue
+
+    except Exception as e:
+        logging.error(f"Error in hourly update: {str(e)}")    
