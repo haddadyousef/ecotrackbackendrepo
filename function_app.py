@@ -29,11 +29,34 @@ class DatabaseManager:
         self.users_container = None
         self.initialize_client()
 
+    def ensure_containers_exist(self):
+        try:
+            # Create database if it doesn't exist
+            database = self.client.create_database_if_not_exists(database_name)
+            
+            # Create containers if they don't exist
+            database.create_container_if_not_exists(
+                id=scores_container_name,
+                partition_key=PartitionKey(path="/userId")
+            )
+            database.create_container_if_not_exists(
+                id=historical_container_name,
+                partition_key=PartitionKey(path="/userId")
+            )
+            database.create_container_if_not_exists(
+                id=users_container_name,
+                partition_key=PartitionKey(path="/userId")
+            )
+        except Exception as e:
+            logging.error(f"Error ensuring containers exist: {str(e)}")
+            raise
+    
     def initialize_client(self):
         try:
             connection_string = os.environ["CosmosDBConnection"]
             self.client = CosmosClient.from_connection_string(connection_string)
             self.database = self.client.get_database_client(database_name)
+            self.ensure_containers_exist()  # Add this line
             self.scores_container = self.database.get_container_client(scores_container_name)
             self.historical_container = self.database.get_container_client(historical_container_name)
             self.users_container = self.database.get_container_client(users_container_name)
@@ -270,8 +293,9 @@ def daily_reset(timer: func.TimerRequest) -> None:
         logging.error(f"Error in daily reset: {str(e)}")
 
 # HTTP Triggered Functions
-@app.function_name(name="UpdateDriving")
 @app.route(route="updatedriving", methods=["POST"])
+@app.function_name(name="UpdateDriving")
+
 def update_driving(req: func.HttpRequest) -> func.HttpResponse:
     try:
         req_body = req.get_json()
@@ -320,8 +344,9 @@ def update_driving(req: func.HttpRequest) -> func.HttpResponse:
             json.dumps({"error": str(e)}),
             status_code=500
         )
-@app.function_name(name="UpdateCarInfo")
 @app.route(route="updatecarinfo", methods=["POST"])
+@app.function_name(name="UpdateCarInfo")
+
 def update_car_info(req: func.HttpRequest) -> func.HttpResponse:
     try:
         req_body = req.get_json()
@@ -358,9 +383,9 @@ def update_car_info(req: func.HttpRequest) -> func.HttpResponse:
             json.dumps({"error": str(e)}),
             status_code=500
         )
-
-@app.function_name(name="UpdateCarbonOffsets")
+    
 @app.route(route="updateoffsets", methods=["POST"])
+@app.function_name(name="UpdateCarbonOffsets")
 def update_carbon_offsets(req: func.HttpRequest) -> func.HttpResponse:
     try:
         req_body = req.get_json()
@@ -450,8 +475,8 @@ def get_leaderboard(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500
         )
 
-@app.function_name(name="GetUserStats")
 @app.route(route="userstats/{user_id}", methods=["GET"])
+@app.function_name(name="GetUserStats") 
 def get_user_stats(req: func.HttpRequest) -> func.HttpResponse:
     try:
         user_id = req.route_params.get('user_id')
@@ -464,44 +489,14 @@ def get_user_stats(req: func.HttpRequest) -> func.HttpResponse:
         current_week = datetime.datetime.utcnow().isocalendar()[1]
         user_doc = get_or_create_user(user_id, current_week)
         
-        # Get historical data
-        historical_container = db_manager.get_container(historical_container_name)
-        historical_query = """
-        SELECT 
-            c.weekNumber,
-            c.weeklyScore,
-            c.dailyHistory,
-            c.offsetGrams
-        FROM c
-        WHERE c.userId = @userId
-        ORDER BY c.weekNumber DESC
-        OFFSET 0 LIMIT 5
-        """
-        
-        historical_data = list(historical_container.query_items(
-            query=historical_query,
-            parameters=[{"name": "@userId", "value": user_id}],
-            enable_cross_partition_query=True
-        ))
-
-        # Calculate averages and totals
-        total_emissions = sum(week['weeklyScore'] for week in historical_data)
-        total_offsets = sum(week.get('offsetGrams', 0) for week in historical_data)
-        
+        # Format response to match frontend expectations exactly
         response_data = {
-            "currentWeek": {
-                "weeklyScore": user_doc['weeklyScore'],
-                "dailyHistory": user_doc['dailyHistory'],
-                "currentDay": user_doc['currentDayEmissions'],
-                "offsetGrams": user_doc.get('offsetGrams', 0)
-            },
-            "historical": historical_data,
+            "userId": user_id,  # Add this
+            "weeklyScore": user_doc['weeklyScore'],
+            "dailyHistory": user_doc['dailyHistory'],
+            "currentDayEmissions": user_doc['currentDayEmissions'],  # Change from currentDay to currentDayEmissions
+            "offsetGrams": user_doc.get('offsetGrams', 0),
             "carDetails": user_doc.get('carDetails', {}),
-            "totals": {
-                "emissions": total_emissions,
-                "offsets": total_offsets,
-                "net": total_emissions - total_offsets
-            },
             "lastUpdated": user_doc.get('lastUpdated', datetime.datetime.utcnow().isoformat())
         }
         
@@ -512,9 +507,18 @@ def get_user_stats(req: func.HttpRequest) -> func.HttpResponse:
         )
     except Exception as e:
         logging.error(f"Error fetching user stats: {str(e)}")
+        # Return error response in the same format
         return func.HttpResponse(
-            json.dumps({"error": str(e)}),
-            status_code=500
+            json.dumps({
+                "userId": user_id,
+                "weeklyScore": 0,
+                "dailyHistory": [create_empty_emissions() for _ in range(7)],
+                "currentDayEmissions": create_empty_emissions(),
+                "offsetGrams": 0,
+                "carDetails": {},
+                "lastUpdated": datetime.datetime.utcnow().isoformat()
+            }),
+            status_code=200  # Return 200 with empty data instead of 500
         )
 
 @app.function_name(name="GetUserPosition")
@@ -578,8 +582,35 @@ def get_user_position(req: func.HttpRequest) -> func.HttpResponse:
             json.dumps({"error": str(e)}),
             status_code=500
         )
-@app.function_name(name="UpdateWeeklyScore")
+@app.route(route="createuser/{user_id}", methods=["POST"])
+@app.function_name(name="CreateUser")
+def create_user(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        user_id = req.route_params.get('user_id')
+        if not user_id:
+            return func.HttpResponse(
+                json.dumps({"error": "User ID is required"}),
+                status_code=400
+            )
+
+        current_week = datetime.datetime.utcnow().isocalendar()[1]
+        user_doc = get_or_create_user(user_id, current_week)
+        
+        return func.HttpResponse(
+            json.dumps({
+                "message": "User created successfully",
+                "userId": user_id
+            }),
+            status_code=200
+        )
+    except Exception as e:
+        logging.error(f"Error creating user: {str(e)}")
+        return func.HttpResponse(
+            json.dumps({"error": str(e)}),
+            status_code=500
+        )
 @app.route(route="updateweeklyscore", methods=["POST"])
+@app.function_name(name="UpdateWeeklyScore")
 def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
     try:
         req_body = req.get_json()
@@ -609,7 +640,7 @@ def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
         
         return func.HttpResponse(
             json.dumps({
-                "message": "Score updated successfully",
+                "message": "Weekly score updated successfully",
                 "currentScore": user_doc['weeklyScore']
             }),
             status_code=200
@@ -621,45 +652,3 @@ def update_weekly_score(req: func.HttpRequest) -> func.HttpResponse:
             json.dumps({"error": str(e)}),
             status_code=500
         )
-@app.function_name(name="HourlyUpdate")
-@app.schedule(schedule="0 0 * * * *", arg_name="timer", run_on_startup=False)
-def hourly_update(timer: func.TimerRequest) -> None:
-    try:
-        container = db_manager.get_container(scores_container_name)
-        current_week = datetime.datetime.utcnow().isocalendar()[1]
-        
-        # Get all active users
-        query = "SELECT * FROM c WHERE c.weekNumber = @week"
-        parameters = [{"name": "@week", "value": current_week}]
-        
-        items = list(container.query_items(
-            query=query,
-            parameters=parameters,
-            enable_cross_partition_query=True
-        ))
-
-        for item in items:
-            try:
-                # Update passive emissions (adjusted values)
-                item['currentDayEmissions']['food'] += 17  # 400/24 per hour
-                item['currentDayEmissions']['goods'] += 19  # 460/24 per hour
-                
-                # Update weekly score
-                item['weeklyScore'] = calculate_weekly_score(
-                    item['dailyHistory'],
-                    item['currentDayEmissions'],
-                    item.get('offsetGrams', 0)
-                )
-                
-                # Update timestamp
-                item['lastUpdated'] = datetime.datetime.utcnow().isoformat()
-                
-                container.upsert_item(item)
-                
-                logging.info(f"Updated emissions for user {item['userId']}: food={item['currentDayEmissions']['food']}, goods={item['currentDayEmissions']['goods']}")
-            except Exception as e:
-                logging.error(f"Error updating user {item.get('userId')}: {str(e)}")
-                continue
-
-    except Exception as e:
-        logging.error(f"Error in hourly update: {str(e)}")    
