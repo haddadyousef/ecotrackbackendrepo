@@ -71,10 +71,12 @@ jobs:
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_22EB2584C6F249998D4B9C2D425B5C8A }}
 
       - name: 'Deploy to Azure Functions'
-        uses: Azure/functions-action@v1
-        id: deploy-to-function
-        with:
-          app-name: 'functionappbackend'
-          slot-name: 'Production'
-          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          
+              uses: Azure/functions-action@v1
+              id: deploy-to-function
+              with:
+                app-name: 'functionappbackend'
+                slot-name: 'Production'
+                package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+                deployment-method: zipDeploy
+                enable-oryx-build: true  # Add this for Python apps on Linux
+                scm-do-build-during-deployment: true  # Add this for Python apps on Linux
