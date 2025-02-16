@@ -17,6 +17,9 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read #This is required for actions/checkout
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -50,9 +53,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: build
-    
     permissions:
       id-token: write #This is required for requesting the JWT
+      contents: read #This is required for actions/checkout
 
     steps:
       - name: Download artifact from build job
@@ -66,17 +69,15 @@ jobs:
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E1BB4A41302245CFB3D9E1CFF62112E1 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_2FA120D62D0F44D1A2B1240082AAEFA0 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_22EB2584C6F249998D4B9C2D425B5C8A }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_A8D5C8F96F9447A8819712A7C6F508D4 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_24CE8E9BE3514A0EA7145C144FDF7873 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_2A7230C8074347C3A028FE1A6521DDAF }}
 
       - name: 'Deploy to Azure Functions'
-              uses: Azure/functions-action@v1
-              id: deploy-to-function
-              with:
-                app-name: 'functionappbackend'
-                slot-name: 'Production'
-                package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-                deployment-method: zipDeploy
-                enable-oryx-build: true  # Add this for Python apps on Linux
-                scm-do-build-during-deployment: true  # Add this for Python apps on Linux
+        uses: Azure/functions-action@v1
+        id: deploy-to-function
+        with:
+          app-name: 'functionappbackend'
+          slot-name: 'Production'
+          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+          
