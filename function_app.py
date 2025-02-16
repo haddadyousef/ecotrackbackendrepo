@@ -88,10 +88,23 @@ class UserCalendar:
 
     def get_weekly_total(self):
         today = datetime.datetime.utcnow().date()
-        week_start = today - timedelta(days=today.weekday())
+        current_weekday = today.weekday()  # 0 is Monday, 6 is Sunday
+        week_start = today - timedelta(days=current_weekday)  # This gets us back to Monday
+        
+        # Calculate total emissions from Monday up to today
         total = 0
-        for i in range(7):
+        for i in range(current_weekday + 1):  # +1 to include today
             date = week_start + timedelta(days=i)
+            date_str = date.isoformat()
+            if date_str in self.entries:
+                total += self.entries[date_str].total
+        return total
+
+    def get_previous_week_total(self, week_start_date: datetime.date):
+        """Calculate total for a complete previous week"""
+        total = 0
+        for i in range(7):  # Always 7 days for previous weeks
+            date = week_start_date + timedelta(days=i)
             date_str = date.isoformat()
             if date_str in self.entries:
                 total += self.entries[date_str].total
@@ -204,8 +217,9 @@ def get_or_create_user(user_id: str) -> Dict:
     except Exception as e:
         logging.error(f"Error in get_or_create_user: {str(e)}")
         raise
+
+@app.function_name(name="GetUserEmissionsHistory") 
 @app.route(route="emissions/history/{user_id}", methods=["GET"])
-@app.function_name(name="GetUserEmissionsHistory")
 def get_date_range(days: int):
     end_date = datetime.datetime.utcnow().date()
     start_date = end_date - timedelta(days=days-1)
@@ -252,8 +266,8 @@ def get_user_emissions_history(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500
         )
 
-@app.route(route="emissions/update", methods=["POST"])
 @app.function_name(name="UpdateEmissions")
+@app.route(route="emissions/update", methods=["POST"])
 def update_emissions(req: func.HttpRequest) -> func.HttpResponse:
     try:
         req_body = req.get_json()
@@ -462,16 +476,21 @@ def get_leaderboard(req: func.HttpRequest) -> func.HttpResponse:
         
         # Calculate net scores for current week
         leaderboard_entries = []
+        today = datetime.datetime.utcnow().date()
+        current_weekday = today.weekday()
+        week_start = today - timedelta(days=current_weekday)
+        
         for item in items:
             calendar = UserCalendar.from_dict(item['calendar'])
-            weekly_total = calendar.get_weekly_total()
+            weekly_total = calendar.get_weekly_total()  # This now only counts from Monday to today
             net_score = weekly_total - calendar.offset_grams
             
             leaderboard_entries.append({
                 "userId": item['userId'],
                 "weeklyScore": weekly_total,
                 "offsetGrams": calendar.offset_grams,
-                "netScore": net_score
+                "netScore": net_score,
+                "daysCount": current_weekday + 1  # Number of days included in the total
             })
         
         # Sort by net score (lower is better)
@@ -481,7 +500,9 @@ def get_leaderboard(req: func.HttpRequest) -> func.HttpResponse:
             json.dumps({
                 "leaderboard": leaderboard_entries,
                 "totalUsers": len(leaderboard_entries),
-                "lastUpdated": datetime.datetime.utcnow().isoformat()
+                "weekStart": week_start.isoformat(),
+                "lastUpdated": datetime.datetime.utcnow().isoformat(),
+                "daysInWeek": current_weekday + 1
             }),
             mimetype="application/json",
             status_code=200
